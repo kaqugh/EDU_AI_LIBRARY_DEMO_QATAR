@@ -3,8 +3,26 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
+# Optional (keeps your existing imports even if not used on the chat page)
 from offline_retrieval import recommend_for_user, semantic_search_books
 from manager_dashboard_full import manager_dashboard_full
+
+# --- OpenAI + .env support ---
+# 1) Try st.secrets["OPENAI_API_KEY"] (best for Streamlit Cloud)
+# 2) Else load from environment or .env file using python-dotenv
+OPENAI_API_KEY = None
+try:
+    OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
+except Exception:
+    pass
+
+if not OPENAI_API_KEY:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
+    except Exception:
+        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 
 # -------------------------------------------------------------------
 # Global setup
@@ -28,13 +46,48 @@ def log_interaction(user, question, answer):
 
 
 # -------------------------------------------------------------------
+# OpenAI answer helper
+# -------------------------------------------------------------------
+def ai_answer(user_name: str, question: str, context: str = "") -> str:
+    """
+    Uses OpenAI (if key available) to answer the user's question.
+    Restricts answers to Qatar school libraries domain.
+    Falls back to a deterministic demo reply if no key or error.
+    """
+    system_msg = (
+        "أنت مساعد مكتبة ذكي لمكتبات وزارة التربية والتعليم والتعليم العالي في قطر. "
+        "أجب بإيجاز وبالعربية قدر الإمكان. لا تجب خارج نطاق المكتبات المدرسية في قطر. "
+        "إن لم تتوفر معلومات كافية، اطلب توضيحاً."
+    )
+    if not OPENAI_API_KEY:
+        return f"📚 (وضع تجريبي بلا مفتاح) سؤالك: «{question}». سأساعدك بمعلومات عامة ضمن مكتبات قطر."
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        prompt = f"المستخدم: {user_name}\nالسياق:\n{context}\nالسؤال: {question}"
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        return f"⚠️ تعذّر استخدام واجهة OpenAI الآن. سبب تقني: {e}\nسؤالك: «{question}»."
+
+
+# -------------------------------------------------------------------
 # Login / Homepage View
 # -------------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
     st.subheader("واجهة الدخول الرئيسية")
 
-    # Load users
+    # Load users (bilingual names)
     df = pd.read_csv(USERS_CSV, encoding="utf-8-sig").dropna(subset=["name", "role"])
     df["name"] = df["name"].astype(str).str.strip()
 
@@ -77,6 +130,7 @@ def login_view():
                 "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.session_state["page"] = "chat"
+            # First greeting message
             st.session_state["messages"] = [
                 {"role": "assistant", "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
             ]
@@ -112,7 +166,15 @@ def chat_view():
     q = st.chat_input("اكتب سؤالك هنا...")
     if q:
         st.session_state["messages"].append({"role": "user", "content": q})
-        ans = f"📚 المكتبة الذكية: سؤالك كان '{q}'. سأساعدك في العثور على الكتب والمراجع المناسبة."
+
+        # (Optional) simple context from recommendations (if you want to enrich the prompt)
+        try:
+            recs = recommend_for_user(user.get("name",""), k=3)
+            ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
+        except Exception:
+            ctx = ""
+
+        ans = ai_answer(user_name=user.get("name",""), question=q, context=ctx)
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
         st.stop()
