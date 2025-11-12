@@ -168,7 +168,7 @@ def chat_view():
         ans = ai_answer(user_name=user.get("name",""), question=q, context=ctx)
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
-        st.experimental_rerun()  # refresh chat properly
+        st.rerun()  # refresh chat properly
 
 
 # -------------------------------------------------------------------
