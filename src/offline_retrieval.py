@@ -1,61 +1,45 @@
 
-import os, pandas as pd
-from typing import List, Tuple
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
 from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-VECTORS_DIR = os.path.join("vectors", "combined_index")
-META_CSV = os.path.join("vectors", "combined_meta.csv")
-BOOKS_CSV = os.path.join("data", "books_dataset.csv")
-USERS_CSV = os.path.join("data", "users_profiles.csv")
-
-_embedder = None
-_vs = None
-_meta = None
-_books = None
-_users = None
+VECTORS_DIR = "vectors"
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+_embedder = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
 
 def _load():
-    global _embedder, _vs, _meta, _books, _users
-    if _embedder is None:
-        _embedder = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    if _vs is None:
-        _vs = FAISS.load_local(VECTORS_DIR, _embedder, allow_dangerous_deserialization=True)
-    if _meta is None:
-        _meta = pd.read_csv(META_CSV)
-    if _books is None:
-        _books = pd.read_csv(BOOKS_CSV)
-    if _users is None:
-        _users = pd.read_csv(USERS_CSV)
+    if os.path.exists(VECTORS_DIR) and any(f.endswith(".faiss") for f in os.listdir(VECTORS_DIR)):
+        return FAISS.load_local(VECTORS_DIR, _embedder, allow_dangerous_deserialization=True)
+    else:
+        print("⚠️ No FAISS index found — running in demo mode.")
+        return None
 
-def recommend_for_user(user_name: str, k: int = 5) -> List[Tuple[str, float]]:
-    _load()
-    query = f"User profile | name: {user_name}"
-    docs = _vs.similarity_search_with_score(query, k=50)
+def recommend_for_user(user_name, k=5):
+    _vs = _load()
+    if not _vs:
+        # Demo fallback recommendations
+        demo_books = [
+            ("الذكاء الاصطناعي في التعليم", 0.91),
+            ("الابتكار في تعلم اللغة العربية", 0.87),
+            ("أساسيات البرمجة للمدارس", 0.85),
+            ("مهارات التفكير النقدي", 0.82),
+            ("التعلم الرقمي في قطر", 0.80)
+        ]
+        return demo_books[:k]
+    else:
+        query_vector = _embedder.embed_query(user_name)
+        results = _vs.similarity_search_with_score(user_name, k=k)
+        return [(r.page_content, s) for r, s in results]
 
-    out = []
-    for doc, score in docs:
-        if "Book | title:" in doc.page_content:
-            try:
-                title = doc.page_content.split("Book | title:")[1].split("|")[0].strip()
-            except:
-                title = "Unknown"
-            out.append((title, float(score)))
-        if len(out) >= k:
-            break
-    return out
-
-def semantic_search_books(query: str, k: int = 5) -> List[Tuple[str, float]]:
-    _load()
-    docs = _vs.similarity_search_with_score(f"Book search | {query}", k=100)
-    out = []
-    for doc, score in docs:
-        if "Book | title:" in doc.page_content:
-            try:
-                title = doc.page_content.split("Book | title:")[1].split("|")[0].strip()
-            except:
-                title = "Unknown"
-            out.append((title, float(score)))
-        if len(out) >= k:
-            break
-    return out
+def semantic_search_books(query, k=5):
+    _vs = _load()
+    if not _vs:
+        demo_books = [
+            ("الذكاء الاصطناعي في التعليم", 0.91),
+            ("أساسيات البرمجة للمدارس", 0.85),
+            ("مهارات التفكير النقدي", 0.82)
+        ]
+        return demo_books[:k]
+    else:
+        results = _vs.similarity_search_with_score(query, k=k)
+        return [(r.page_content, s) for r, s in results]
