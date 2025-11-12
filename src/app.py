@@ -28,35 +28,46 @@ def log_interaction(user, question, answer):
 
 
 # -------------------------------------------------------------------
-# Function: Home / Login page
+# Login / Homepage View
 # -------------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
     st.subheader("واجهة الدخول الرئيسية")
 
-    df = pd.read_csv(USERS_CSV)
-    st.markdown("### 👥 اختر الفئة:")
+    # Load users
+    df = pd.read_csv(USERS_CSV, encoding="utf-8-sig").dropna(subset=["name", "role"])
+    df["name"] = df["name"].astype(str).str.strip()
 
-    # Show 3 main icons
+    st.markdown("### 👥 اختر الفئة:")
     col1, col2, col3 = st.columns(3)
+
     with col1:
         if st.button("🎓 الطلاب", use_container_width=True):
             st.session_state["selected_group"] = "طالب"
+
     with col2:
         if st.button("👨‍🏫 المعلمون", use_container_width=True):
             st.session_state["selected_group"] = "معلم"
+
     with col3:
         if st.button("🏛️ موظفو الوزارة", use_container_width=True):
             st.session_state["selected_group"] = "مدير قسم المكتبات"
 
-    # When group selected → show name list
+    # Show user list if group selected
     if "selected_group" in st.session_state:
         group = st.session_state["selected_group"]
         st.markdown(f"### 🧾 قائمة {group}:")
-        filtered = df[df["role"].str.contains(group, case=False, na=False)]
-        selected_name = st.selectbox("اختر اسمك:", filtered["name"].tolist(), key="user_select")
 
-        if selected_name and st.button("✅ تسجيل الدخول", use_container_width=True):
+        filtered = df[df["role"].str.contains(group, case=False, na=False)]
+        if filtered.empty:
+            st.warning("⚠️ لا توجد أسماء ضمن هذه الفئة.")
+            return
+
+        selected_name = st.selectbox(
+            "اختر اسمك الكامل:", filtered["name"].tolist(), key="user_select"
+        )
+
+        if st.button("✅ تسجيل الدخول", use_container_width=True) and selected_name:
             user = filtered[filtered["name"] == selected_name].iloc[0].to_dict()
             st.session_state["user"] = {
                 "name": user["name"],
@@ -69,58 +80,54 @@ def login_view():
             st.session_state["messages"] = [
                 {"role": "assistant", "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
             ]
-            st.toast(f"تم تسجيل دخول {user['name']} بنجاح 🎓")
-            st.experimental_set_query_params(page="chat")
+            st.toast(f"✅ تم تسجيل دخول {user['name']}")
+            st.stop()
 
 
 # -------------------------------------------------------------------
-# Function: Chat view (AI Library agent)
+# Chat View
 # -------------------------------------------------------------------
 def chat_view():
     user = st.session_state.get("user", {})
 
-    # --- Top bar with Back button ---
-    cols = st.columns([0.1, 0.9])
+    # Top bar with back button
+    cols = st.columns([0.15, 0.85])
     with cols[0]:
         if st.button("🏠 العودة للرئيسية", help="العودة إلى واجهة الدخول"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
             st.session_state.clear()
-            st.experimental_set_query_params(page="home")
             st.stop()
     with cols[1]:
         st.title("💬 مكتبة قطر الذكية — AI Library Agent")
 
-    # --- Sidebar info ---
     st.sidebar.success(f"✅ {user.get('name','')} — {user.get('role','')}")
 
-    # --- Display chat history ---
+    # Display messages
     for msg in st.session_state.get("messages", []):
         if msg["role"] == "assistant":
             st.markdown(f"**🤖 المكتبة الذكية:** {msg['content']}")
         else:
             st.markdown(f"**🧑‍💻 {user.get('name','المستخدم')}:** {msg['content']}")
 
-    # --- Chat input ---
+    # Chat input
     q = st.chat_input("اكتب سؤالك هنا...")
     if q:
         st.session_state["messages"].append({"role": "user", "content": q})
-        ans = f"📚 المكتبة الذكية: سؤالك كان '{q}'. سأساعدك في العثور على الكتب أو المراجع المناسبة."
+        ans = f"📚 المكتبة الذكية: سؤالك كان '{q}'. سأساعدك في العثور على الكتب والمراجع المناسبة."
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
-        st.experimental_set_query_params(page="chat")
-        st.experimental_rerun()
+        st.stop()
 
 
 # -------------------------------------------------------------------
-# Main controller
+# Main Controller
 # -------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="EDU_AI_LIBRARY — Online Demo", layout="wide")
-    params = st.experimental_get_query_params()
-    page = params.get("page", ["home"])[0]
 
-    if page == "chat" and "user" in st.session_state:
+    # Routing between pages
+    if "page" not in st.session_state:
+        login_view()
+    elif st.session_state["page"] == "chat" and "user" in st.session_state:
         chat_view()
     else:
         login_view()
