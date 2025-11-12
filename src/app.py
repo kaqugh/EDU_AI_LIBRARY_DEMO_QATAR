@@ -73,10 +73,15 @@ def app_view():
             if ONLINE_MODE:
                 ans = f"🔹 رد تجريبي (Online): تم استقبال سؤالك '{q}'. يركّز النظام فقط على مكتبات قطر."
             else:
-                from local_model_loader import local_generate
-                context = "\\n".join([f"- {t}" for t,_ in top]) if top else "No prior recommendations."
-                prompt = f\"\"\"You are an assistant for Qatar school libraries.\\nContext:\\n{context}\\nQuestion: {q}\\nAnswer shortly in Arabic.\"\"\"
-                ans = local_generate(prompt, max_tokens=220, temp=0.2)
+    from local_model_loader import local_generate
+    context = "\n".join([f"- {t}" for t,_ in top]) if top else "No prior recommendations."
+    prompt = f"""You are an assistant for Qatar school libraries.
+Context:
+{context}
+Question: {q}
+Answer shortly in Arabic."""
+    ans = local_generate(prompt, max_tokens=220, temp=0.2)
+
             st.markdown(ans)
             log_interaction(st.session_state["user"], q, ans)
 
