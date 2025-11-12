@@ -81,9 +81,9 @@ Context:
 Question: {q}
 Answer shortly in Arabic."""
     ans = local_generate(prompt, max_tokens=220, temp=0.2)
+st.markdown(ans)
+log_interaction(st.session_state["user"], q, ans)
 
-            st.markdown(ans)
-            log_interaction(st.session_state["user"], q, ans)
 
     with tab2:
         query = st.text_input("أدخل عبارة البحث:")
