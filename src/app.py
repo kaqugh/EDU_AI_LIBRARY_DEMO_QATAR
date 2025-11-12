@@ -9,7 +9,7 @@ from offline_retrieval import recommend_for_user, semantic_search_books
 from manager_dashboard_full import manager_dashboard_full
 
 # -------------------------------------------------------------------
-#  Load API key (works for Streamlit Cloud Secrets OR local .env)
+# Load API key (works for Streamlit Secrets OR local .env)
 # -------------------------------------------------------------------
 OPENAI_API_KEY = None
 try:
@@ -24,15 +24,12 @@ if not OPENAI_API_KEY:
     except Exception:
         OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 
-# -------------------------------------------------------------------
-#  Basic setup
-# -------------------------------------------------------------------
-USERS_CSV = "data/users_profiles.csv"
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+USERS_CSV = "data/users_profiles.csv"
 
 
 # -------------------------------------------------------------------
-#  Log user activity
+# Utility: log user activity
 # -------------------------------------------------------------------
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
@@ -46,7 +43,7 @@ def log_interaction(user, question, answer):
 
 
 # -------------------------------------------------------------------
-#  GPT helper
+# GPT helper
 # -------------------------------------------------------------------
 def ai_answer(user_name: str, question: str, context: str = "") -> str:
     """Use OpenAI if key exists, otherwise fallback demo reply."""
@@ -55,7 +52,6 @@ def ai_answer(user_name: str, question: str, context: str = "") -> str:
         "قدّم إجابات قصيرة ودقيقة بالعربية. ركّز على الكتب، المراجع، والتعليم."
     )
 
-    # no key → demo reply
     if not OPENAI_API_KEY:
         return f"📚 (وضع تجريبي بلا مفتاح) سؤالك: «{question}»."
 
@@ -76,12 +72,12 @@ def ai_answer(user_name: str, question: str, context: str = "") -> str:
 
 
 # -------------------------------------------------------------------
-#  Login view
+# Login view
 # -------------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
     st.subheader("واجهة الدخول الرئيسية")
-    st.markdown(f"🔑 **Key detected:** `{bool(OPENAI_API_KEY)}`")
+    st.markdown(f"🔑 **Key Active:** `{bool(OPENAI_API_KEY)}`")
 
     df = pd.read_csv(USERS_CSV, encoding="utf-8-sig").dropna(subset=["name", "role"])
     df["name"] = df["name"].astype(str).str.strip()
@@ -91,12 +87,15 @@ def login_view():
     with col1:
         if st.button("🎓 الطلاب", use_container_width=True):
             st.session_state["selected_group"] = "طالب"
+            st.session_state.pop("user_select", None)
     with col2:
         if st.button("👨‍🏫 المعلمون", use_container_width=True):
             st.session_state["selected_group"] = "معلم"
+            st.session_state.pop("user_select", None)
     with col3:
         if st.button("🏛️ موظفو الوزارة", use_container_width=True):
             st.session_state["selected_group"] = "مدير قسم المكتبات"
+            st.session_state.pop("user_select", None)
 
     if "selected_group" in st.session_state:
         group = st.session_state["selected_group"]
@@ -106,9 +105,11 @@ def login_view():
             st.warning("⚠️ لا توجد أسماء ضمن هذه الفئة.")
             return
 
-        selected_name = st.selectbox("اختر اسمك الكامل:", filtered["name"].tolist(), key="user_select")
+        # show entire list every time freshly
+        names_list = filtered["name"].drop_duplicates().sort_values().tolist()
+        selected_name = st.selectbox("اختر اسمك الكامل:", names_list, key="user_select")
 
-        if st.button("✅ تسجيل الدخول", use_container_width=True) and selected_name:
+        if selected_name and st.button("✅ تسجيل الدخول", use_container_width=True):
             user = filtered[filtered["name"] == selected_name].iloc[0].to_dict()
             st.session_state["user"] = {
                 "name": user["name"],
@@ -122,12 +123,13 @@ def login_view():
                 {"role": "assistant",
                  "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
             ]
+            st.session_state["last_question"] = None
             st.toast(f"✅ تم تسجيل دخول {user['name']}")
             st.stop()
 
 
 # -------------------------------------------------------------------
-#  Chat view
+# Chat view
 # -------------------------------------------------------------------
 def chat_view():
     user = st.session_state.get("user", {})
@@ -141,19 +143,22 @@ def chat_view():
         st.title("💬 مكتبة قطر الذكية — AI Library Agent")
 
     st.sidebar.success(f"✅ {user.get('name','')} — {user.get('role','')}")
-    st.sidebar.caption(f"🔑 OpenAI Key Active: {bool(OPENAI_API_KEY)}")
+    st.sidebar.caption(f"🔑 Key Active: {bool(OPENAI_API_KEY)}")
 
+    # Show chat history
     for msg in st.session_state.get("messages", []):
         if msg["role"] == "assistant":
             st.markdown(f"**🤖 المكتبة الذكية:** {msg['content']}")
         else:
             st.markdown(f"**🧑‍💻 {user.get('name','المستخدم')}:** {msg['content']}")
 
+    # Chat input
     q = st.chat_input("اكتب سؤالك هنا...")
-    if q:
+    if q and q != st.session_state.get("last_question"):
+        st.session_state["last_question"] = q
         st.session_state["messages"].append({"role": "user", "content": q})
 
-        # optional small context from recommendations
+        # small context from recommendations
         try:
             recs = recommend_for_user(user.get("name",""), k=3)
             ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
@@ -163,11 +168,11 @@ def chat_view():
         ans = ai_answer(user_name=user.get("name",""), question=q, context=ctx)
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
-        st.stop()
+        st.experimental_rerun()  # refresh chat properly
 
 
 # -------------------------------------------------------------------
-#  Main controller
+# Main controller
 # -------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="EDU_AI_LIBRARY — Online Demo", layout="wide")
