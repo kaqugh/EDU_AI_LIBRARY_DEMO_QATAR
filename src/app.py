@@ -28,14 +28,43 @@ def log_interaction(user, question, answer):
 # -------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
-    st.subheader("تسجيل الدخول")
+    st.subheader("تسجيل الدخول التجريبي")
 
+    # Load users
+    df = pd.read_csv(USERS_CSV)
+
+    # --- Demo user icons section ---
+    st.markdown("### 👥 اختر مستخدمًا لتجربة الدخول:")
+    cols = st.columns(3)
+
+    # Display clickable cards (each column shows one user)
+    for idx, (_, user) in enumerate(df.iterrows()):
+        col = cols[idx % 3]
+        with col:
+            st.markdown(
+                f"""
+                <div style='text-align:center; border:1px solid #e0e0e0; border-radius:12px; padding:12px; margin:4px;'>
+                    <h4 style='margin-bottom:4px;'>{user['name']}</h4>
+                    <p style='font-size:14px; color:#555;'>{user['department']}</p>
+                    <p style='font-size:13px; color:#888;'>({user['role']})</p>
+                    <form action="#" method="get">
+                        <button type="button" onclick="window.location.reload()" style="background-color:#0F67B1; color:white; border:none; border-radius:8px; padding:4px 12px; font-size:13px;">
+                            استخدام هذا الحساب
+                        </button>
+                    </form>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    # --- Manual login section ---
+    st.markdown("---")
+    st.subheader("أو قم بتسجيل الدخول يدويًا:")
     name = st.text_input("👤 الاسم (كما في قائمة المستخدمين):")
     school = st.text_input("🏫 المدرسة / القسم:")
-    role = st.selectbox("🎓 الدور:", ["طالب", "معلم", "أمين مكتبة", "مدير قسم المكتبات", "admin"])
+    role = st.selectbox("🎓 الدور:", ["طالب","معلم","أمين مكتبة","مدير قسم المكتبات","admin"])
 
     if st.button("✅ دخول"):
-        df = pd.read_csv(USERS_CSV)
         match = df[df["name"].str.strip().str.lower() == name.strip().lower()]
         if match.empty:
             st.error("المستخدم غير موجود في القائمة. (هذا ديمو يسمح فقط بالأسماء الموجودة).")
@@ -47,12 +76,13 @@ def login_view():
         st.session_state["user"] = {
             "name": user["name"],
             "role": user["role"],
-            "school": user.get("department", ""),
-            "user_id": user.get("user_id", ""),
+            "school": user.get("department",""),
+            "user_id": user.get("user_id",""),
             "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         st.success(f"مرحبًا {user['name']} 👋")
         st.experimental_rerun()
+
 
 # -------------------------------------------------------------
 # Function: Main application view
