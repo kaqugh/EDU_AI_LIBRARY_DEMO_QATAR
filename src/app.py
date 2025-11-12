@@ -2,20 +2,20 @@ import os, csv
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from openai import OpenAI
 
-# Optional (keeps your existing imports even if not used on the chat page)
+# Optional existing imports
 from offline_retrieval import recommend_for_user, semantic_search_books
 from manager_dashboard_full import manager_dashboard_full
 
-# --- OpenAI + .env support ---
-# 1) Try st.secrets["OPENAI_API_KEY"] (best for Streamlit Cloud)
-# 2) Else load from environment or .env file using python-dotenv
+# -------------------------------------------------------------------
+#  Load API key (works for Streamlit Cloud Secrets OR local .env)
+# -------------------------------------------------------------------
 OPENAI_API_KEY = None
 try:
     OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
 except Exception:
     pass
-
 if not OPENAI_API_KEY:
     try:
         from dotenv import load_dotenv
@@ -25,14 +25,14 @@ if not OPENAI_API_KEY:
         OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 
 # -------------------------------------------------------------------
-# Global setup
+#  Basic setup
 # -------------------------------------------------------------------
-ONLINE_MODE = os.environ.get("ONLINE_MODE", "true").lower() == "true"
 USERS_CSV = "data/users_profiles.csv"
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 # -------------------------------------------------------------------
-# Utility: log user activity
+#  Log user activity
 # -------------------------------------------------------------------
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
@@ -46,79 +46,67 @@ def log_interaction(user, question, answer):
 
 
 # -------------------------------------------------------------------
-# OpenAI answer helper
+#  GPT helper
 # -------------------------------------------------------------------
 def ai_answer(user_name: str, question: str, context: str = "") -> str:
-    """
-    Uses OpenAI (if key available) to answer the user's question.
-    Restricts answers to Qatar school libraries domain.
-    Falls back to a deterministic demo reply if no key or error.
-    """
+    """Use OpenAI if key exists, otherwise fallback demo reply."""
     system_msg = (
-        "أنت مساعد مكتبة ذكي لمكتبات وزارة التربية والتعليم والتعليم العالي في قطر. "
-        "أجب بإيجاز وبالعربية قدر الإمكان. لا تجب خارج نطاق المكتبات المدرسية في قطر. "
-        "إن لم تتوفر معلومات كافية، اطلب توضيحاً."
+        "أنت مساعد مكتبة ذكي تابع لوزارة التربية والتعليم والتعليم العالي في قطر. "
+        "قدّم إجابات قصيرة ودقيقة بالعربية. ركّز على الكتب، المراجع، والتعليم."
     )
+
+    # no key → demo reply
     if not OPENAI_API_KEY:
-        return f"📚 (وضع تجريبي بلا مفتاح) سؤالك: «{question}». سأساعدك بمعلومات عامة ضمن مكتبات قطر."
+        return f"📚 (وضع تجريبي بلا مفتاح) سؤالك: «{question}»."
 
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
         prompt = f"المستخدم: {user_name}\nالسياق:\n{context}\nالسؤال: {question}"
-        resp = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=300,
-            temperature=0.3,
+            max_tokens=350,
+            temperature=0.3
         )
-        return (resp.choices[0].message.content or "").strip()
+        return (response.choices[0].message.content or "").strip()
     except Exception as e:
-        return f"⚠️ تعذّر استخدام واجهة OpenAI الآن. سبب تقني: {e}\nسؤالك: «{question}»."
+        return f"⚠️ تعذر استخدام واجهة OpenAI الآن. السبب: {e}"
 
 
 # -------------------------------------------------------------------
-# Login / Homepage View
+#  Login view
 # -------------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
     st.subheader("واجهة الدخول الرئيسية")
+    st.markdown(f"🔑 **Key detected:** `{bool(OPENAI_API_KEY)}`")
 
-    # Load users (bilingual names)
     df = pd.read_csv(USERS_CSV, encoding="utf-8-sig").dropna(subset=["name", "role"])
     df["name"] = df["name"].astype(str).str.strip()
 
     st.markdown("### 👥 اختر الفئة:")
     col1, col2, col3 = st.columns(3)
-
     with col1:
         if st.button("🎓 الطلاب", use_container_width=True):
             st.session_state["selected_group"] = "طالب"
-
     with col2:
         if st.button("👨‍🏫 المعلمون", use_container_width=True):
             st.session_state["selected_group"] = "معلم"
-
     with col3:
         if st.button("🏛️ موظفو الوزارة", use_container_width=True):
             st.session_state["selected_group"] = "مدير قسم المكتبات"
 
-    # Show user list if group selected
     if "selected_group" in st.session_state:
         group = st.session_state["selected_group"]
         st.markdown(f"### 🧾 قائمة {group}:")
-
         filtered = df[df["role"].str.contains(group, case=False, na=False)]
         if filtered.empty:
             st.warning("⚠️ لا توجد أسماء ضمن هذه الفئة.")
             return
 
-        selected_name = st.selectbox(
-            "اختر اسمك الكامل:", filtered["name"].tolist(), key="user_select"
-        )
+        selected_name = st.selectbox("اختر اسمك الكامل:", filtered["name"].tolist(), key="user_select")
 
         if st.button("✅ تسجيل الدخول", use_container_width=True) and selected_name:
             user = filtered[filtered["name"] == selected_name].iloc[0].to_dict()
@@ -130,21 +118,20 @@ def login_view():
                 "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.session_state["page"] = "chat"
-            # First greeting message
             st.session_state["messages"] = [
-                {"role": "assistant", "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
+                {"role": "assistant",
+                 "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
             ]
             st.toast(f"✅ تم تسجيل دخول {user['name']}")
             st.stop()
 
 
 # -------------------------------------------------------------------
-# Chat View
+#  Chat view
 # -------------------------------------------------------------------
 def chat_view():
     user = st.session_state.get("user", {})
 
-    # Top bar with back button
     cols = st.columns([0.15, 0.85])
     with cols[0]:
         if st.button("🏠 العودة للرئيسية", help="العودة إلى واجهة الدخول"):
@@ -154,20 +141,19 @@ def chat_view():
         st.title("💬 مكتبة قطر الذكية — AI Library Agent")
 
     st.sidebar.success(f"✅ {user.get('name','')} — {user.get('role','')}")
+    st.sidebar.caption(f"🔑 OpenAI Key Active: {bool(OPENAI_API_KEY)}")
 
-    # Display messages
     for msg in st.session_state.get("messages", []):
         if msg["role"] == "assistant":
             st.markdown(f"**🤖 المكتبة الذكية:** {msg['content']}")
         else:
             st.markdown(f"**🧑‍💻 {user.get('name','المستخدم')}:** {msg['content']}")
 
-    # Chat input
     q = st.chat_input("اكتب سؤالك هنا...")
     if q:
         st.session_state["messages"].append({"role": "user", "content": q})
 
-        # (Optional) simple context from recommendations (if you want to enrich the prompt)
+        # optional small context from recommendations
         try:
             recs = recommend_for_user(user.get("name",""), k=3)
             ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
@@ -181,12 +167,10 @@ def chat_view():
 
 
 # -------------------------------------------------------------------
-# Main Controller
+#  Main controller
 # -------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="EDU_AI_LIBRARY — Online Demo", layout="wide")
-
-    # Routing between pages
     if "page" not in st.session_state:
         login_view()
     elif st.session_state["page"] == "chat" and "user" in st.session_state:
@@ -197,4 +181,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
