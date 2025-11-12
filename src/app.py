@@ -49,8 +49,9 @@ def login_view():
                     "user_id": s.get("user_id",""),
                     "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
+                st.session_state["page"] = "app"
                 st.success(f"✅ تم تسجيل دخول الطالب {s['name']}")
-                st.experimental_rerun()
+                st.stop()
 
     # --- معلمون ---
     with col2:
@@ -65,8 +66,9 @@ def login_view():
                     "user_id": t.get("user_id",""),
                     "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
+                st.session_state["page"] = "app"
                 st.success(f"✅ تم تسجيل دخول المعلم {t['name']}")
-                st.experimental_rerun()
+                st.stop()
 
     # --- مدراء المكتبات ---
     with col3:
@@ -81,11 +83,13 @@ def login_view():
                     "user_id": m.get("user_id",""),
                     "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
+                st.session_state["page"] = "app"
                 st.success(f"✅ تم تسجيل دخول المدير {m['name']}")
-                st.experimental_rerun()
+                st.stop()
 
     st.markdown("---")
     st.caption("💡 ملاحظة: يمكن إضافة مستخدمين جدد عبر تحديث ملف users_profiles.csv.")
+
 
 
 
