@@ -3,3 +3,4 @@ pandas
 faiss-cpu
 sentence-transformers
 matplotlib
+langchain-community
