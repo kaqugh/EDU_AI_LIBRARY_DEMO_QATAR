@@ -28,62 +28,65 @@ def log_interaction(user, question, answer):
 # -------------------------------------------------------------
 def login_view():
     st.title("📘 EDU_AI_LIBRARY — Qatar")
-    st.subheader("تسجيل الدخول التجريبي")
+    st.subheader("واجهة الدخول التجريبية")
 
-    # Load users
     df = pd.read_csv(USERS_CSV)
 
-    # --- Demo user icons section ---
-    st.markdown("### 👥 اختر مستخدمًا لتجربة الدخول:")
-    cols = st.columns(3)
+    st.markdown("### 👥 اختر الفئة:")
 
-    # Display clickable cards (each column shows one user)
-    for idx, (_, user) in enumerate(df.iterrows()):
-        col = cols[idx % 3]
-        with col:
-            st.markdown(
-                f"""
-                <div style='text-align:center; border:1px solid #e0e0e0; border-radius:12px; padding:12px; margin:4px;'>
-                    <h4 style='margin-bottom:4px;'>{user['name']}</h4>
-                    <p style='font-size:14px; color:#555;'>{user['department']}</p>
-                    <p style='font-size:13px; color:#888;'>({user['role']})</p>
-                    <form action="#" method="get">
-                        <button type="button" onclick="window.location.reload()" style="background-color:#0F67B1; color:white; border:none; border-radius:8px; padding:4px 12px; font-size:13px;">
-                            استخدام هذا الحساب
-                        </button>
-                    </form>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+    col1, col2, col3 = st.columns(3)
 
-    # --- Manual login section ---
+    # --- طلاب ---
+    with col1:
+        st.markdown("<h3 style='text-align:center;'>🎓 الطلاب</h3>", unsafe_allow_html=True)
+        students = df[df["role"].str.contains("طالب", case=False, na=False)]
+        for _, s in students.iterrows():
+            if st.button(f"{s['name']} — {s.get('department','')}", key=f"stu_{s['name']}"):
+                st.session_state["user"] = {
+                    "name": s["name"],
+                    "role": s["role"],
+                    "school": s.get("department",""),
+                    "user_id": s.get("user_id",""),
+                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.success(f"✅ تم تسجيل دخول الطالب {s['name']}")
+                st.experimental_rerun()
+
+    # --- معلمون ---
+    with col2:
+        st.markdown("<h3 style='text-align:center;'>👨‍🏫 المعلمون</h3>", unsafe_allow_html=True)
+        teachers = df[df["role"].str.contains("معلم", case=False, na=False)]
+        for _, t in teachers.iterrows():
+            if st.button(f"{t['name']} — {t.get('department','')}", key=f"tea_{t['name']}"):
+                st.session_state["user"] = {
+                    "name": t["name"],
+                    "role": t["role"],
+                    "school": t.get("department",""),
+                    "user_id": t.get("user_id",""),
+                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.success(f"✅ تم تسجيل دخول المعلم {t['name']}")
+                st.experimental_rerun()
+
+    # --- مدراء المكتبات ---
+    with col3:
+        st.markdown("<h3 style='text-align:center;'>🏛️ مدراء المكتبات</h3>", unsafe_allow_html=True)
+        managers = df[df["role"].str.contains("مدير|أمين مكتبة", case=False, na=False)]
+        for _, m in managers.iterrows():
+            if st.button(f"{m['name']} — {m.get('department','')}", key=f"man_{m['name']}"):
+                st.session_state["user"] = {
+                    "name": m["name"],
+                    "role": m["role"],
+                    "school": m.get("department",""),
+                    "user_id": m.get("user_id",""),
+                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.success(f"✅ تم تسجيل دخول المدير {m['name']}")
+                st.experimental_rerun()
+
     st.markdown("---")
-    st.subheader("أو قم بتسجيل الدخول يدويًا:")
-    name = st.text_input("👤 الاسم (كما في قائمة المستخدمين):")
-    school = st.text_input("🏫 المدرسة / القسم:")
-    role = st.selectbox("🎓 الدور:", ["طالب","معلم","أمين مكتبة","مدير قسم المكتبات","admin"])
+    st.caption("💡 ملاحظة: يمكن إضافة مستخدمين جدد عبر تحديث ملف users_profiles.csv.")
 
-       if st.button("✅ دخول"):
-        match = df[df["name"].str.strip().str.lower() == name.strip().lower()]
-        if match.empty:
-            st.error("المستخدم غير موجود في القائمة. (هذا ديمو يسمح فقط بالأسماء الموجودة).")
-            return
-        user = match.iloc[0].to_dict()
-        if not bool(user.get("active", True)):
-            st.warning("حسابك قيد المراجعة. الرجاء التواصل مع الإدارة.")
-            return
-        st.session_state["user"] = {
-            "name": user["name"],
-            "role": user["role"],
-            "school": user.get("department", ""),
-            "user_id": user.get("user_id", ""),
-            "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        st.success(f"مرحبًا {user['name']} 👋")
-        st.session_state["logged_in"] = True
-        st.experimental_set_query_params(reload="true")
-        st.experimental_rerun()
 
 
 
