@@ -64,7 +64,7 @@ def login_view():
     school = st.text_input("🏫 المدرسة / القسم:")
     role = st.selectbox("🎓 الدور:", ["طالب","معلم","أمين مكتبة","مدير قسم المكتبات","admin"])
 
-    if st.button("✅ دخول"):
+       if st.button("✅ دخول"):
         match = df[df["name"].str.strip().str.lower() == name.strip().lower()]
         if match.empty:
             st.error("المستخدم غير موجود في القائمة. (هذا ديمو يسمح فقط بالأسماء الموجودة).")
@@ -76,12 +76,15 @@ def login_view():
         st.session_state["user"] = {
             "name": user["name"],
             "role": user["role"],
-            "school": user.get("department",""),
-            "user_id": user.get("user_id",""),
+            "school": user.get("department", ""),
+            "user_id": user.get("user_id", ""),
             "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         st.success(f"مرحبًا {user['name']} 👋")
+        st.session_state["logged_in"] = True
+        st.experimental_set_query_params(reload="true")
         st.experimental_rerun()
+
 
 
 # -------------------------------------------------------------
