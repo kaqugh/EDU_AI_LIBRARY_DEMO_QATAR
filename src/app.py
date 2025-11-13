@@ -1,30 +1,29 @@
 import os, csv
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 
-# Optional existing imports
 from offline_retrieval import recommend_for_user, semantic_search_books
 from manager_dashboard_full import manager_dashboard_full
 
 
-# -------------------------------------------------------------------
-# وزارة التربية والتعليم - الشريط العلوي الرسمي
-# -------------------------------------------------------------------
+# ============================================================
+#  MINISTRY HEADER
+# ============================================================
 def ministry_header():
     st.markdown(
         """
         <div style="
             background-color:#E8F3FB;
-            padding:15px 20px;
+            padding:15px;
             border-radius:10px;
-            text-align:center;
             border:1px solid #c8e1f0;
-            margin-bottom:20px;">
-            <h3 style="margin:0; color:#003366; font-family:'Tajawal',sans-serif;">
+            text-align:center;
+            font-family:'Tajawal', sans-serif;">
+            <h3 style="margin:0; color:#003366;">
                 🇶🇦 وزارة التربية والتعليم والتعليم العالي – 
-                <span style="color:#0073e6;">Ministry of Education and Higher Education - Qatar</span>
+                <span style="color:#0059b3;">Ministry of Education and Higher Education - Qatar</span>
             </h3>
         </div>
         """,
@@ -32,232 +31,310 @@ def ministry_header():
     )
 
 
-# -------------------------------------------------------------------
-# Load API key (works for Streamlit Secrets OR local .env)
-# -------------------------------------------------------------------
+# ============================================================
+#  LOAD API KEY
+# ============================================================
 OPENAI_API_KEY = None
+
 try:
     OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
 except Exception:
     pass
+
 if not OPENAI_API_KEY:
     try:
         from dotenv import load_dotenv
         load_dotenv()
         OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
-    except Exception:
+    except:
         OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
 USERS_CSV = "data/users_profiles.csv"
+BOOKS_CSV = "data/books.csv"
 
 
-# -------------------------------------------------------------------
-# Utility: log user activity
-# -------------------------------------------------------------------
+# ============================================================
+#  CSV LOAD/SAVE FUNCTIONS
+# ============================================================
+def load_users():
+    return pd.read_csv(USERS_CSV, encoding="utf-8-sig")
+
+def save_users(df):
+    df.to_csv(USERS_CSV, index=False, encoding="utf-8-sig")
+
+def load_books():
+    return pd.read_csv(BOOKS_CSV, encoding="utf-8-sig")
+
+def save_books(df):
+    df.to_csv(BOOKS_CSV, index=False, encoding="utf-8-sig")
+
+
+# ============================================================
+#  LOGGING
+# ============================================================
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
     row = [
-        user.get("name"), user.get("school"), user.get("role"),
-        question, (answer[:120] + "...") if answer else "",
+        user.get("name"), user.get("role"), user.get("school"),
+        question, answer[:100],
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ]
     with open("logs/user_activity.csv", "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(row)
 
 
-# -------------------------------------------------------------------
-# GPT helper
-# -------------------------------------------------------------------
+# ============================================================
+#  AI ANSWER (NORMAL GPT)
+# ============================================================
 def ai_answer(user_name: str, question: str, context: str = "") -> str:
-    """Use OpenAI if key exists, otherwise fallback demo reply."""
+
     system_msg = (
-        "أنت مساعد مكتبة ذكي تابع لوزارة التربية والتعليم والتعليم العالي في قطر. "
-        "قدّم إجابات قصيرة ودقيقة بالعربية. ركّز على الكتب، المراجع، والتعليم."
+        "أنت مساعد مكتبة ذكي تابع لوزارة التعليم في قطر. "
+        "أجب بالعربية وبشكل مختصر ودقيق. ركّز على كتب المناهج والمدارس."
     )
 
     if not OPENAI_API_KEY:
-        return f"📚 (وضع تجريبي بلا مفتاح) سؤالك: «{question}»."
+        return f"📚 (وضع تجريبي بدون مفتاح OpenAI). سؤالك: {question}"
 
     try:
         prompt = f"المستخدم: {user_name}\nالسياق:\n{context}\nالسؤال: {question}"
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=350,
+            max_tokens=300,
             temperature=0.3
         )
-        return (response.choices[0].message.content or "").strip()
+        return resp.choices[0].message.content.strip()
+
     except Exception as e:
-        return f"⚠️ تعذر استخدام واجهة OpenAI الآن. السبب: {e}"
+        return f"⚠️ خطأ أثناء الاتصال بـ OpenAI: {e}"
 
 
-# -------------------------------------------------------------------
-# Login view (Improved with icons + dropdowns for each group)
-# -------------------------------------------------------------------
+# ============================================================
+#  CHECK → IS QUESTION A BORROW REQUEST?
+# ============================================================
+def is_borrow_intent(q):
+    keywords = ["استعارة", "استعير", "أخذ كتاب", "احجز", "أريد كتاب", "borrow"]
+    return any(k in q for k in keywords)
+
+
+# ============================================================
+#  CHECK → USER ASKING ABOUT AVAILABILITY?
+# ============================================================
+def is_availability_intent(q):
+    keywords = ["متوفر", "متاح", "available", "status", "هل يوجد"]
+    return any(k in q for k in keywords)
+
+
+# ============================================================
+#  BORROW BOOK LOGIC
+# ============================================================
+def handle_borrow(user, question):
+    books = load_books()
+    users = load_users()
+
+    # STEP 1: find closest book
+    results = semantic_search_books(question, k=1)
+    if not results:
+        return "❌ لم أجد كتابًا مشابهًا لهذا الاسم."
+
+    book_title, _ = results[0]
+
+    book_row = books[books["title"] == book_title]
+    if book_row.empty:
+        return "❌ تعذر العثور على هذا الكتاب في قاعدة البيانات."
+
+    book_index = book_row.index[0]
+
+    # if already borrowed
+    if books.loc[book_index, "status"] == "borrowing":
+        return f"❌ الكتاب **{book_title}** مستعار حاليًا. متوقع عودته في: {books.loc[book_index, 'borrow_end']}"
+
+    # check if user already borrowed one
+    u = users[users["user_id"] == user["user_id"]].index[0]
+    if str(users.loc[u, "borrowed_books"]).strip() != "":
+        return "⚠️ لا يمكنك استعارة أكثر من كتاب واحد حاليًا."
+
+    # PROCESS BORROW
+    today = datetime.today()
+    return_date = today + timedelta(days=7)
+
+    # update book
+    books.loc[book_index, "status"] = "borrowing"
+    books.loc[book_index, "borrow_start"] = today.date().isoformat()
+    books.loc[book_index, "borrow_end"] = return_date.date().isoformat()
+
+    # update user
+    users.loc[u, "borrowed_books"] = book_title
+    users.loc[u, "borrow_start"] = today.date().isoformat()
+    users.loc[u, "borrow_end"] = return_date.date().isoformat()
+
+    save_books(books)
+    save_users(users)
+
+    return f"✅ تم حجز كتاب **{book_title}** لك حتى تاريخ **{return_date.date().isoformat()}**."
+
+
+# ============================================================
+#  CHECK AVAILABILITY
+# ============================================================
+def handle_availability(question):
+    books = load_books()
+    results = semantic_search_books(question, k=1)
+
+    if not results:
+        return "❌ لم أجد كتابًا مطابقًا."
+
+    title, _ = results[0]
+    row = books[books["title"] == title].iloc[0]
+
+    if row["status"] == "available":
+        return f"📗 الكتاب **{title}** متوفر الآن."
+
+    else:
+        return (
+            f"❌ الكتاب **{title}** مستعار حاليًا.\n"
+            f"📅 تاريخ الإرجاع المتوقع: {row['borrow_end']}"
+        )
+
+
+# ============================================================
+#  LOGIN VIEW
+# ============================================================
 def login_view():
-    ministry_header()   # شعار الوزارة العلوي
+    ministry_header()
+    st.title("📘 نظام المكتبة الذكية – Qatar EDU AI Library")
+    st.caption(f"🔑 Key Active: {bool(OPENAI_API_KEY)}")
 
-    st.title("📘 EDU_AI_LIBRARY — Qatar")
-    st.subheader("واجهة الدخول الرئيسية")
-    st.markdown(f"🔑 **Key Active:** `{bool(OPENAI_API_KEY)}`")
+    df = load_users()
 
-    # تحميل بيانات المستخدمين
-    df = pd.read_csv(USERS_CSV, encoding="utf-8-sig").dropna(subset=["name", "role"])
-    df["name"] = df["name"].astype(str).str.strip()
+    # Normalization to avoid RTL issues
+    def normalize(s):
+        return str(s).replace("\u200f","").replace("\u200e","").strip().lower()
 
-    # تقسيم المستخدمين إلى مجموعات
-    students = df[df["role"].str.contains("طالب", case=False, na=False)]
-    teachers = df[df["role"].str.contains("معلم", case=False, na=False)]
-    ministry = df[df["role"].str.contains("مدير قسم المكتبات", case=False, na=False)]
+    df["rn"] = df["role"].apply(normalize)
 
-    # 3 أعمدة رئيسية
+    df["bucket"] = df["rn"].apply(
+        lambda r:
+            "طالب" if "طالب" in r or "student" in r else
+            "معلم" if "معلم" in r or "teacher" in r else
+            "مدير قسم المكتبات"
+    )
+
+    students = df[df["bucket"] == "طالب"]
+    teachers = df[df["bucket"] == "معلم"]
+    ministry = df[df["bucket"] == "مدير قسم المكتبات"]
+
     col1, col2, col3 = st.columns(3)
 
-    # ---- الطلاب ----
+    # Students
     with col1:
-        st.markdown("### 🎓 الطلاب")
-        selected_student = st.selectbox(
-            "اختر اسم الطالب:",
-            ["— اختر —"] + sorted(students["name"].tolist()),
-            key="student_select",
-            label_visibility="collapsed"
-        )
-        if st.button("✅ دخول الطالب", use_container_width=True):
-            if selected_student != "— اختر —":
-                user = students[students["name"] == selected_student].iloc[0].to_dict()
-                st.session_state["user"] = {
-                    "name": user["name"],
-                    "role": user["role"],
-                    "school": user.get("department", ""),
-                    "user_id": user.get("user_id", ""),
-                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.session_state["page"] = "chat"
-                st.session_state["messages"] = [
-                    {"role": "assistant",
-                     "content": f"🎉 مرحبًا {user['name']}! هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟"}
-                ]
-                st.session_state["last_question"] = None
-                st.toast(f"✅ تم تسجيل دخول الطالب {user['name']}")
+        st.subheader("🎓 الطلاب")
+        name = st.selectbox("اختر اسم الطالب", ["— اختر —"] + sorted(students["name"].tolist()), key="st_sel")
+        if st.button("دخول الطالب"):
+            if name != "— اختر —":
+                user = students[students["name"] == name].iloc[0].to_dict()
+                _login_user(user)
                 st.rerun()
-            else:
-                st.warning("الرجاء اختيار اسم من القائمة.")
 
-    # ---- المعلمون ----
+    # Teachers
     with col2:
-        st.markdown("### 👨‍🏫 المعلمون")
-        selected_teacher = st.selectbox(
-            "اختر اسم المعلم:",
-            ["— اختر —"] + sorted(teachers["name"].tolist()),
-            key="teacher_select",
-            label_visibility="collapsed"
-        )
-        if st.button("✅ دخول المعلم", use_container_width=True):
-            if selected_teacher != "— اختر —":
-                user = teachers[teachers["name"] == selected_teacher].iloc[0].to_dict()
-                st.session_state["user"] = {
-                    "name": user["name"],
-                    "role": user["role"],
-                    "school": user.get("department", ""),
-                    "user_id": user.get("user_id", ""),
-                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.session_state["page"] = "chat"
-                st.session_state["messages"] = [
-                    {"role": "assistant",
-                     "content": f"🎓 أهلًا {user['name']}! كيف يمكن للمكتبة مساعدتك اليوم؟"}
-                ]
-                st.session_state["last_question"] = None
-                st.toast(f"✅ تم تسجيل دخول المعلم {user['name']}")
+        st.subheader("👨‍🏫 المعلمون")
+        name = st.selectbox("اختر اسم المعلم", ["— اختر —"] + sorted(teachers["name"].tolist()), key="t_sel")
+        if st.button("دخول المعلم"):
+            if name != "— اختر —":
+                user = teachers[teachers["name"] == name].iloc[0].to_dict()
+                _login_user(user)
                 st.rerun()
-            else:
-                st.warning("الرجاء اختيار اسم من القائمة.")
 
-    # ---- موظفو الوزارة ----
+    # Ministry
     with col3:
-        st.markdown("### 🏛️ موظفو الوزارة")
-        selected_ministry = st.selectbox(
-            "اختر اسم الموظف:",
-            ["— اختر —"] + sorted(ministry["name"].tolist()),
-            key="ministry_select",
-            label_visibility="collapsed"
-        )
-        if st.button("✅ دخول الوزارة", use_container_width=True):
-            if selected_ministry != "— اختر —":
-                user = ministry[ministry["name"] == selected_ministry].iloc[0].to_dict()
-                st.session_state["user"] = {
-                    "name": user["name"],
-                    "role": user["role"],
-                    "school": user.get("department", ""),
-                    "user_id": user.get("user_id", ""),
-                    "login_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.session_state["page"] = "chat"
-                st.session_state["messages"] = [
-                    {"role": "assistant",
-                     "content": f"🏛️ مرحبًا {user['name']} من وزارة التعليم! كيف يمكن للمكتبة مساعدتك اليوم؟"}
-                ]
-                st.session_state["last_question"] = None
-                st.toast(f"✅ تم تسجيل دخول {user['name']} من الوزارة")
+        st.subheader("🏛️ موظفو الوزارة")
+        name = st.selectbox("اختر اسم الموظف", ["— اختر —"] + sorted(ministry["name"].tolist()), key="m_sel")
+        if st.button("دخول الوزارة"):
+            if name != "— اختر —":
+                user = ministry[ministry["name"] == name].iloc[0].to_dict()
+                _login_user(user)
                 st.rerun()
-            else:
-                st.warning("الرجاء اختيار اسم من القائمة.")
 
 
-# -------------------------------------------------------------------
-# Chat view
-# -------------------------------------------------------------------
+def _login_user(user):
+    st.session_state["user"] = {
+        "name": user["name"],
+        "role": user["role"],
+        "user_id": user["user_id"],
+        "school": user.get("department", "")
+    }
+    st.session_state["page"] = "chat"
+    st.session_state["messages"] = [{
+        "role": "assistant",
+        "content": f"👋 مرحبًا {user['name']}! كيف يمكنني مساعدتك اليوم؟"
+    }]
+    st.session_state["last_question"] = None
+    st.toast("✔️ تم تسجيل الدخول")
+
+
+# ============================================================
+#  CHAT VIEW
+# ============================================================
 def chat_view():
-    ministry_header()   # شعار الوزارة العلوي
-    user = st.session_state.get("user", {})
+    ministry_header()
 
-    cols = st.columns([0.15, 0.85])
-    with cols[0]:
-        if st.button("🏠 العودة للرئيسية", help="العودة إلى واجهة الدخول"):
-            st.session_state.clear()
-            st.rerun()
-    with cols[1]:
-        st.title("💬 مكتبة قطر الذكية — AI Library Agent")
+    user = st.session_state["user"]
 
-    st.sidebar.success(f"✅ {user.get('name','')} — {user.get('role','')}")
-    st.sidebar.caption(f"🔑 Key Active: {bool(OPENAI_API_KEY)}")
+    if st.button("🏠 العودة للرئيسية"):
+        st.session_state.clear()
+        st.rerun()
 
-    # Show chat history
-    for msg in st.session_state.get("messages", []):
+    st.title("🤖 الوكيل الذكي لمكتبات مدارس قطر – AI Library Agent")
+    st.sidebar.success(f"{user['name']} – {user['role']}")
+
+    for msg in st.session_state["messages"]:
         if msg["role"] == "assistant":
             st.markdown(f"**🤖 المكتبة الذكية:** {msg['content']}")
         else:
-            st.markdown(f"**🧑‍💻 {user.get('name','المستخدم')}:** {msg['content']}")
+            st.markdown(f"**🧑‍💻 أنت:** {msg['content']}")
 
     q = st.chat_input("اكتب سؤالك هنا...")
     if q and q != st.session_state.get("last_question"):
         st.session_state["last_question"] = q
         st.session_state["messages"].append({"role": "user", "content": q})
 
-        try:
-            recs = recommend_for_user(user.get("name",""), k=3)
-            ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
-        except Exception:
-            ctx = ""
+        # Determine intent
+        if is_borrow_intent(q):
+            ans = handle_borrow(user, q)
 
-        ans = ai_answer(user_name=user.get("name",""), question=q, context=ctx)
+        elif is_availability_intent(q):
+            ans = handle_availability(q)
+
+        else:
+            # normal GPT answer
+            try:
+                recs = recommend_for_user(user["name"], k=3)
+                ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
+            except:
+                ctx = ""
+            ans = ai_answer(user["name"], q, ctx)
+
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
         st.rerun()
 
 
-# -------------------------------------------------------------------
-# Main controller
-# -------------------------------------------------------------------
+# ============================================================
+#  MAIN CONTROLLER
+# ============================================================
 def main():
-    st.set_page_config(page_title="EDU_AI_LIBRARY — Online Demo", layout="wide")
+    st.set_page_config(page_title="EDU AI Library – Qatar", layout="wide")
+
     if "page" not in st.session_state:
         login_view()
-    elif st.session_state["page"] == "chat" and "user" in st.session_state:
+    elif st.session_state["page"] == "chat":
         chat_view()
     else:
         login_view()
