@@ -7,57 +7,31 @@ from openai import OpenAI
 from offline_retrieval import recommend_for_user, semantic_search_books
 from manager_dashboard_full import manager_dashboard_full
 
-
-# ============================================================
-#  MINISTRY HEADER
-# ============================================================
-def ministry_header():
-    st.markdown(
-        """
-        <div style="
-            background-color:#E8F3FB;
-            padding:15px;
-            border-radius:10px;
-            border:1px solid #c8e1f0;
-            text-align:center;
-            font-family:'Tajawal', sans-serif;">
-            <h3 style="margin:0; color:#003366;">
-                🇶🇦 وزارة التربية والتعليم والتعليم العالي – 
-                <span style="color:#0059b3;">Ministry of Education and Higher Education - Qatar</span>
-            </h3>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-#  LOAD API KEY
-# ============================================================
-OPENAI_API_KEY = None
-
-try:
-    OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
-except Exception:
-    pass
-
-if not OPENAI_API_KEY:
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
-    except:
-        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
-
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
+# ========== CONFIGURATION ==========
 USERS_CSV = "data/users_profiles.csv"
 BOOKS_CSV = "data/books.csv"
 
+# ========== LOAD API KEY ==========
+OPENAI_API_KEY = None
+try:
+    OPENAI_API_KEY = st.secrets.get("OPENAI_KEY")
+except:
+    from dotenv import load_dotenv
+    load_dotenv()
+    OPENAI_API_KEY = os.getenv("OPENAI_KEY")
 
-# ============================================================
-#  CSV LOAD/SAVE FUNCTIONS
-# ============================================================
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+# ========== UI HEADER ==========
+def ministry_header():
+    st.markdown("""
+        <div style="background-color:#E8F3FB; padding:15px; border-radius:10px; border:1px solid #c8e1f0; text-align:center; font-family:'Tajawal', sans-serif;">
+        <h3 style="margin:0; color:#003366;">
+            🇶🇦 وزارة التربية والتعليم والتعليم العالي – 
+            <span style="color:#0059b3;">Ministry of Education and Higher Education - Qatar</span>
+        </h3></div>""", unsafe_allow_html=True)
+
+# ========== FILE HANDLING ==========
 def load_users():
     return pd.read_csv(USERS_CSV, encoding="utf-8-sig")
 
@@ -70,36 +44,33 @@ def load_books():
 def save_books(df):
     df.to_csv(BOOKS_CSV, index=False, encoding="utf-8-sig")
 
-
-# ============================================================
-#  LOGGING
-# ============================================================
+# ========== LOGGING ==========
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
-    row = [
-        user.get("name"), user.get("role"), user.get("school"),
-        question, answer[:100],
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ]
+    row = [user.get("name"), user.get("role"), user.get("school"), question, answer[:120], datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
     with open("logs/user_activity.csv", "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(row)
 
+# ========== AI INTENTS ==========
+def is_borrow_intent(q):
+    return any(k in q for k in ["استعارة", "أريد كتاب", "أستعير", "borrow"])
 
-# ============================================================
-#  AI ANSWER (NORMAL GPT)
-# ============================================================
+def is_availability_intent(q):
+    return any(k in q for k in ["متاح", "متوفر", "available"])
+
+def is_return_intent(q):
+    return any(k in q for k in ["إرجاع", "ارجاع", "أعيد", "return"])
+
+def is_recommendation_intent(q):
+    return any(k in q for k in ["انصحني", "اقتراح", "توصي", "recommend"])
+
+# ========== AI RESPONSE ==========
 def ai_answer(user_name: str, question: str, context: str = "") -> str:
-
-    system_msg = (
-        "أنت مساعد مكتبة ذكي تابع لوزارة التعليم في قطر. "
-        "أجب بالعربية وبشكل مختصر ودقيق. ركّز على كتب المناهج والمدارس."
-    )
-
     if not OPENAI_API_KEY:
-        return f"📚 (وضع تجريبي بدون مفتاح OpenAI). سؤالك: {question}"
-
+        return f"🔒 لا يوجد اتصال بـ OpenAI حاليًا."
+    system_msg = "أنت مساعد مكتبة ذكي تابع لوزارة التعليم في قطر. أجب دائمًا بالعربية أو الإنجليزية حسب اللغة المختارة، وبشكل رسمي وموجز."
+    prompt = f"المستخدم: {user_name}\nالسياق:\n{context}\n\nالسؤال: {question}"
     try:
-        prompt = f"المستخدم: {user_name}\nالسياق:\n{context}\nالسؤال: {question}"
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -110,235 +81,142 @@ def ai_answer(user_name: str, question: str, context: str = "") -> str:
             temperature=0.3
         )
         return resp.choices[0].message.content.strip()
-
     except Exception as e:
-        return f"⚠️ خطأ أثناء الاتصال بـ OpenAI: {e}"
+        return f"⚠️ خطأ في الاتصال بـ OpenAI: {e}"
 
-
-# ============================================================
-#  CHECK → IS QUESTION A BORROW REQUEST?
-# ============================================================
-def is_borrow_intent(q):
-    keywords = ["استعارة", "استعير", "أخذ كتاب", "احجز", "أريد كتاب", "borrow"]
-    return any(k in q for k in keywords)
-
-
-# ============================================================
-#  CHECK → USER ASKING ABOUT AVAILABILITY?
-# ============================================================
-def is_availability_intent(q):
-    keywords = ["متوفر", "متاح", "available", "status", "هل يوجد"]
-    return any(k in q for k in keywords)
-
-
-# ============================================================
-#  BORROW BOOK LOGIC
-# ============================================================
+# ========== BORROWING ==========
 def handle_borrow(user, question):
-    books = load_books()
-    users = load_users()
-
-    # STEP 1: find closest book
+    books, users = load_books(), load_users()
     results = semantic_search_books(question, k=1)
     if not results:
-        return "❌ لم أجد كتابًا مشابهًا لهذا الاسم."
-
-    book_title, _ = results[0]
-
-    book_row = books[books["title"] == book_title]
-    if book_row.empty:
-        return "❌ تعذر العثور على هذا الكتاب في قاعدة البيانات."
-
-    book_index = book_row.index[0]
-
-    # if already borrowed
+        return "❌ لم يتم العثور على كتاب مطابق."
+    title, _ = results[0]
+    match = books[books["title"] == title]
+    if match.empty:
+        return f"📘 الكتاب {title} غير موجود في قاعدة البيانات."
+    book_index = match.index[0]
     if books.loc[book_index, "status"] == "borrowing":
-        return f"❌ الكتاب **{book_title}** مستعار حاليًا. متوقع عودته في: {books.loc[book_index, 'borrow_end']}"
-
-    # check if user already borrowed one
-    u = users[users["user_id"] == user["user_id"]].index[0]
-    if str(users.loc[u, "borrowed_books"]).strip() != "":
-        return "⚠️ لا يمكنك استعارة أكثر من كتاب واحد حاليًا."
-
-    # PROCESS BORROW
+        return f"❌ الكتاب **{title}** مستعار حاليًا وسيعود بتاريخ {books.loc[book_index, 'borrow_end']}"
+    user_index = users[users["user_id"] == user["user_id"]].index[0]
+    if str(users.loc[user_index, "borrowed_books"]).strip() != "":
+        return "⚠️ لا يمكن استعارة أكثر من كتاب حاليًا."
     today = datetime.today()
-    return_date = today + timedelta(days=7)
-
-    # update book
-    books.loc[book_index, "status"] = "borrowing"
-    books.loc[book_index, "borrow_start"] = today.date().isoformat()
-    books.loc[book_index, "borrow_end"] = return_date.date().isoformat()
-
-    # update user
-    users.loc[u, "borrowed_books"] = book_title
-    users.loc[u, "borrow_start"] = today.date().isoformat()
-    users.loc[u, "borrow_end"] = return_date.date().isoformat()
-
+    end = today + timedelta(days=7)
+    books.loc[book_index, ["status", "borrow_start", "borrow_end"]] = ["borrowing", today.date(), end.date()]
+    users.loc[user_index, ["borrowed_books", "borrow_start", "borrow_end"]] = [title, today.date(), end.date()]
     save_books(books)
     save_users(users)
+    return f"✅ تم حجز الكتاب **{title}** حتى تاريخ {end.date()}"
 
-    return f"✅ تم حجز كتاب **{book_title}** لك حتى تاريخ **{return_date.date().isoformat()}**."
+# ========== RETURNING ==========
+def handle_return(user, question):
+    books, users = load_books(), load_users()
+    title = user.get("borrowed_books", "").strip()
+    if not title:
+        return "📘 لا يوجد كتاب مسجل على حسابك حاليًا."
+    user_index = users[users["user_id"] == user["user_id"]].index[0]
+    book_index = books[books["title"] == title].index[0]
+    books.loc[book_index, ["status", "borrow_start", "borrow_end"]] = ["available", "", ""]
+    users.loc[user_index, ["borrowed_books", "borrow_start", "borrow_end"]] = ["", "", ""]
+    save_books(books)
+    save_users(users)
+    return f"✅ تم إرجاع الكتاب **{title}**. شكرًا لك."
 
-
-# ============================================================
-#  CHECK AVAILABILITY
-# ============================================================
+# ========== AVAILABILITY ==========
 def handle_availability(question):
     books = load_books()
     results = semantic_search_books(question, k=1)
-
     if not results:
-        return "❌ لم أجد كتابًا مطابقًا."
-
+        return "📘 لم يتم العثور على عنوان مطابق."
     title, _ = results[0]
-    row = books[books["title"] == title].iloc[0]
-
+    df_match = books[books["title"] == title]
+    if df_match.empty:
+        key = title.split("/")[0].strip()
+        df_match = books[books["title"].str.contains(key, case=False, na=False)]
+    if df_match.empty:
+        return f"📘 الكتاب **{title}** غير معروف."
+    row = df_match.iloc[0]
     if row["status"] == "available":
-        return f"📗 الكتاب **{title}** متوفر الآن."
-
+        return f"📗 الكتاب **{row['title']}** متاح حاليًا."
     else:
-        return (
-            f"❌ الكتاب **{title}** مستعار حاليًا.\n"
-            f"📅 تاريخ الإرجاع المتوقع: {row['borrow_end']}"
-        )
+        return f"📕 الكتاب **{row['title']}** معار حاليًا. سيعود بتاريخ {row['borrow_end']}"
 
+# ========== CHAT UI ==========
+def chat_view():
+    ministry_header()
+    user = st.session_state["user"]
+    if st.button("🏠 العودة للواجهة الرئيسية"):
+        st.session_state.clear()
+        st.rerun()
+    st.title("🤖 المساعد الذكي للمكتبة")
+    for msg in st.session_state.get("messages", []):
+        st.markdown(f"**{'🧑‍💻' if msg['role']=='user' else '🤖'}:** {msg['content']}")
+    q = st.chat_input("اكتب سؤالك...")
+    if q and q != st.session_state.get("last_question"):
+        st.session_state["last_question"] = q
+        st.session_state["messages"].append({"role": "user", "content": q})
+        if is_borrow_intent(q):
+            ans = handle_borrow(user, q)
+        elif is_return_intent(q):
+            ans = handle_return(user, q)
+        elif is_availability_intent(q):
+            ans = handle_availability(q)
+        elif is_recommendation_intent(q):
+            recs = recommend_for_user(user["name"], k=3)
+            ans = "📚 اقتراحات لك: " + ", ".join([f"**{t}**" for t, _ in recs]) if recs else "لا توجد اقتراحات حالياً."
+        else:
+            ctx = "\n".join([f"- {t}" for t, _ in recommend_for_user(user["name"], k=3)])
+            ans = ai_answer(user["name"], q, ctx)
+        st.session_state["messages"].append({"role": "assistant", "content": ans})
+        log_interaction(user, q, ans)
+        st.rerun()
 
-# ============================================================
-#  LOGIN VIEW
-# ============================================================
+# ========== LOGIN ==========
 def login_view():
     ministry_header()
-    st.title("📘 نظام المكتبة الذكية – Qatar EDU AI Library")
-    st.caption(f"🔑 Key Active: {bool(OPENAI_API_KEY)}")
-
+    st.title("📘 واجهة تسجيل الدخول")
     df = load_users()
-
-    # Normalization to avoid RTL issues
-    def normalize(s):
-        return str(s).replace("\u200f","").replace("\u200e","").strip().lower()
-
-    df["rn"] = df["role"].apply(normalize)
-
-    df["bucket"] = df["rn"].apply(
-        lambda r:
-            "طالب" if "طالب" in r or "student" in r else
-            "معلم" if "معلم" in r or "teacher" in r else
-            "مدير قسم المكتبات"
-    )
-
-    students = df[df["bucket"] == "طالب"]
-    teachers = df[df["bucket"] == "معلم"]
-    ministry = df[df["bucket"] == "مدير قسم المكتبات"]
-
+    df["group"] = df["role"].apply(lambda r: "طالب" if "طالب" in r else "معلم" if "معلم" in r else "وزارة")
     col1, col2, col3 = st.columns(3)
-
-    # Students
     with col1:
         st.subheader("🎓 الطلاب")
-        name = st.selectbox("اختر اسم الطالب", ["— اختر —"] + sorted(students["name"].tolist()), key="st_sel")
-        if st.button("دخول الطالب"):
-            if name != "— اختر —":
-                user = students[students["name"] == name].iloc[0].to_dict()
-                _login_user(user)
-                st.rerun()
-
-    # Teachers
+        name = st.selectbox("اختر الطالب", sorted(df[df["group"]=="طالب"]["name"]))
+        if st.button("دخول كطالب"):
+            user = df[df["name"]==name].iloc[0].to_dict()
+            _set_session_user(user)
     with col2:
         st.subheader("👨‍🏫 المعلمون")
-        name = st.selectbox("اختر اسم المعلم", ["— اختر —"] + sorted(teachers["name"].tolist()), key="t_sel")
-        if st.button("دخول المعلم"):
-            if name != "— اختر —":
-                user = teachers[teachers["name"] == name].iloc[0].to_dict()
-                _login_user(user)
-                st.rerun()
-
-    # Ministry
+        name = st.selectbox("اختر المعلم", sorted(df[df["group"]=="معلم"]["name"]))
+        if st.button("دخول كمعلم"):
+            user = df[df["name"]==name].iloc[0].to_dict()
+            _set_session_user(user)
     with col3:
         st.subheader("🏛️ موظفو الوزارة")
-        name = st.selectbox("اختر اسم الموظف", ["— اختر —"] + sorted(ministry["name"].tolist()), key="m_sel")
-        if st.button("دخول الوزارة"):
-            if name != "— اختر —":
-                user = ministry[ministry["name"] == name].iloc[0].to_dict()
-                _login_user(user)
-                st.rerun()
+        name = st.selectbox("اختر الموظف", sorted(df[df["group"]=="وزارة"]["name"]))
+        if st.button("دخول كوزارة"):
+            user = df[df["name"]==name].iloc[0].to_dict()
+            _set_session_user(user)
 
-
-def _login_user(user):
+def _set_session_user(user):
     st.session_state["user"] = {
         "name": user["name"],
         "role": user["role"],
         "user_id": user["user_id"],
         "school": user.get("department", "")
     }
+    st.session_state["messages"] = [{"role": "assistant", "content": f"👋 مرحبًا {user['name']}! كيف يمكنني مساعدتك اليوم؟"}]
     st.session_state["page"] = "chat"
-    st.session_state["messages"] = [{
-        "role": "assistant",
-        "content": f"👋 مرحبًا {user['name']}! كيف يمكنني مساعدتك اليوم؟"
-    }]
-    st.session_state["last_question"] = None
-    st.toast("✔️ تم تسجيل الدخول")
+    st.rerun()
 
-
-# ============================================================
-#  CHAT VIEW
-# ============================================================
-def chat_view():
-    ministry_header()
-
-    user = st.session_state["user"]
-
-    if st.button("🏠 العودة للرئيسية"):
-        st.session_state.clear()
-        st.rerun()
-
-    st.title("🤖 الوكيل الذكي لمكتبات مدارس قطر – AI Library Agent")
-    st.sidebar.success(f"{user['name']} – {user['role']}")
-
-    for msg in st.session_state["messages"]:
-        if msg["role"] == "assistant":
-            st.markdown(f"**🤖 المكتبة الذكية:** {msg['content']}")
-        else:
-            st.markdown(f"**🧑‍💻 أنت:** {msg['content']}")
-
-    q = st.chat_input("اكتب سؤالك هنا...")
-    if q and q != st.session_state.get("last_question"):
-        st.session_state["last_question"] = q
-        st.session_state["messages"].append({"role": "user", "content": q})
-
-        # Determine intent
-        if is_borrow_intent(q):
-            ans = handle_borrow(user, q)
-
-        elif is_availability_intent(q):
-            ans = handle_availability(q)
-
-        else:
-            # normal GPT answer
-            try:
-                recs = recommend_for_user(user["name"], k=3)
-                ctx = "\n".join([f"- {t}" for t, _ in (recs or [])])
-            except:
-                ctx = ""
-            ans = ai_answer(user["name"], q, ctx)
-
-        st.session_state["messages"].append({"role": "assistant", "content": ans})
-        log_interaction(user, q, ans)
-        st.rerun()
-
-
-# ============================================================
-#  MAIN CONTROLLER
-# ============================================================
+# ========== MAIN ==========
 def main():
     st.set_page_config(page_title="EDU AI Library – Qatar", layout="wide")
-
     if "page" not in st.session_state:
         login_view()
     elif st.session_state["page"] == "chat":
         chat_view()
     else:
         login_view()
-
 
 if __name__ == "__main__":
     main()
