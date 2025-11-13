@@ -1,4 +1,0 @@
-user_id,name,email,role,department,preferred_language,borrowed_subject,permissions,active,created_at,last_login,borrowed_books_count
-U001,Fatma Al-Kuwari,fatma@moe.qa,مدير قسم المكتبات,وزارة التعليم,Arabic,History,"[""view_reports""]",True,2025-11-12,2025-11-12 08:26:04.934252,1
-U002,Ali Ahmed,ali@school.qa,معلم,مدرسة قطر الثانوية,Arabic,Science,"[""search_books"",""borrow_books""]",True,2025-11-12,2025-11-12 08:26:04.934273,5
-U003,Mohamed Salem,mohamed@school.qa,طالب,مدرسة الريان,Arabic,Math,"[""search_books""]",True,2025-11-12,2025-11-12 08:26:04.934279,2
