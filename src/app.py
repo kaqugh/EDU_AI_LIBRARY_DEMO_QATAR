@@ -1,12 +1,6 @@
-# ✅ Final version of app.py adapted to your uploaded users_profiles.csv structure
-# - Uses preferred_language
-# - Uses permissions
-# - Uses borrowed_books_count
-# - Respects `active` field
-# - NO .env, reads OpenAI key from st.secrets
-
-# ✅ Final version of app.py (SAFE)
-# OpenAI key is securely loaded from Streamlit Secrets only
+# ✅ Final version of app.py with Qatar Library Scope Restriction
+# - Ensures assistant only answers questions related to Qatar school libraries
+# - Adds system instruction and scope validation
 
 import os, csv
 import streamlit as st
@@ -15,20 +9,59 @@ from datetime import datetime, timedelta
 from openai import OpenAI
 from offline_retrieval import recommend_for_user, semantic_search_books
 
-# ========== FILE PATHS ==========
 USERS_CSV = "data/users_profiles.csv"
 BOOKS_CSV = "data/books.csv"
 
-# ========== LOAD API KEY SECURELY ==========
 OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
-st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))  # Debug info
+st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# (rest of your app.py code remains unchanged and safe...)
+# ========== Qatar-specific system message ==========
+def get_qatar_system_message():
+    return (
+        "أنت وكيل مكتبة ذكي خاص بوزارة التربية والتعليم والتعليم العالي في دولة قطر. "
+        "تقتصر إجاباتك فقط على خدمات مكتبات المدارس القطرية، مثل استعارة الكتب، التوصيات، توفّر المصادر، وتقارير الاستعارة. "
+        "إذا وردك سؤال خارج هذا النطاق، اعتذر بلطف واذكر أن مهمتك تقتصر على دعم مكتبات مدارس قطر فقط."
+    )
 
+# ========== Scope Checker ==========
+def is_out_of_scope(question):
+    banned_keywords = [
+        "أوروبا", "السياسة", "ديانة", "معتقد", "روايات عالمية", "الفضاء", "جغرافيا العالم",
+        "أدب روسي", "تاريخ أوروبا", "التاريخ الأمريكي", "الفلسفة الغربية", "رواية", "الحرب العالمية"
+    ]
+    return any(kw in question.lower() for kw in banned_keywords)
 
-# (rest of your app.py code remains unchanged and safe...)
+# ========== AI Answering ==========
+def ai_answer(user, question, context=""):
+    if is_out_of_scope(question):
+        return "⚠️ اختصاصي يقتصر فقط على دعم مكتبات المدارس القطرية."
 
+    lang = str(user.get("preferred_language", "Arabic")).lower()
+    prompt = f"User: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
+    system_msg = get_qatar_system_message()
+
+    if not client:
+        return "🔒 لا يوجد اتصال بمفتاح OpenAI."
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"⚠️ خطأ أثناء الاتصال بـ OpenAI: {e}"
+
+# باقي الكود يبقى كما هو دون تعديل
+
+# (يرجى التأكد من أن `chat_view()` تستخدم ai_answer الآن وتتحقق من out_of_scope إذا رغبت بالتحقق المسبق)
+# ويمكنك لاحقًا نقل هذا المنطق داخل chat_view مباشرة إن أردت دمجًا أعمق
 
 
 
