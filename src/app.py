@@ -9,68 +9,86 @@
 # OpenAI key is securely loaded from Streamlit Secrets only
 
 # ✅ Final version of app.py (with availability check fix)
+# ✅ النسخة السابقة من app.py مع واجهة تسجيل دخول للمجموعات الثلاث (طلاب، معلمون، موظفو الوزارة)
 
 import os, csv
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from openai import OpenAI
 from offline_retrieval import recommend_for_user, semantic_search_books
 
-# ========== FILE PATHS ==========
+# ========== إعداد المسارات ==========
 USERS_CSV = "data/users_profiles.csv"
 BOOKS_CSV = "data/books.csv"
 
-# ========== LOAD API KEY SECURELY ==========
+# ========== إعداد مفتاح OpenAI ==========
 OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
-st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))  # Debug info
+st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# ========== LOAD BOOKS & USERS ==============
-books = pd.read_csv(BOOKS_CSV)
+# ========== تحميل البيانات ==========
 users = pd.read_csv(USERS_CSV)
+books = pd.read_csv(BOOKS_CSV)
 
-# ========== AVAILABILITY HANDLER ============
-def handle_availability(title):
-    matches = books[books["title"] == title]
-    if matches.empty:
-        return "عذرًا، لم أجد هذا الكتاب ضمن قاعدة البيانات."
-    row = matches.iloc[0]
-    status = row.get("status", "متاح")
-    if status.lower() == "borrowed":
-        return f"الكتاب '{title}' حاليًا مُستعار حتى {row.get('expected_return', 'غير محدد')}"
-    return f"✅ الكتاب '{title}' متاح للاستعارة."
+# ========== دالة تسجيل الدخول ==========
+def login_view():
+    st.title("📘 EDU_AI_LIBRARY — Qatar")
+    st.subheader("واجهة الدخول الرئيسية")
 
-# ========== STREAMLIT UI ============
-st.set_page_config(page_title="Smart Library Assistant", layout="wide")
-st.title("📚 مكتبة قطر الذكية — AI Library Agent")
+    group = st.selectbox("👥 اختر الفئة:", ["طلاب", "معلمون", "مدير قسم المكتبات"])
+    filtered = users[users["role"] == ("طالب" if group == "طلاب" else ("معلم" if group == "معلمون" else "مدير قسم المكتبات"))]
+    name = st.selectbox("👤 اختر اسمك:", filtered["name"].tolist())
 
-if "user" not in st.session_state:
-    st.session_state.user = {"name": "زائر"}
+    if st.button("✅ تسجيل الدخول"):
+        user = filtered[filtered["name"] == name].iloc[0].to_dict()
+        st.session_state.user = {
+            "name": user["name"],
+            "role": user["role"],
+            "school": user.get("department", "")
+        }
+        st.success(f"مرحبًا {user['name']} 👋")
+        st.rerun()
 
-st.markdown(f"مرحبًا 👋 {st.session_state.user['name']}، كيف يمكنني مساعدتك اليوم؟")
+# ========== دالة العرض الرئيسية ==========
+def app_view():
+    st.sidebar.success(f"🟢 {st.session_state['user']['name']} — {st.session_state['user']['role']}")
+    st.title("🤖 مكتبة قطر الذكية — AI Library Agent")
+    st.caption("هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟")
 
-# INPUT
-q = st.chat_input("اكتب سؤالك هنا...")
-if q:
-    with st.chat_message("user"):
-        st.write(q)
+    q = st.chat_input("✍️ اكتب سؤالك هنا...")
+    if q:
+        with st.chat_message("user"):
+            st.write(q)
 
-    # Simple availability check example
-    if "متوفر" in q or "متاح" in q:
-        answer = handle_availability(q.replace("هل", "").replace("متوفر", "").replace("متاح", "").strip())
-    elif client and OPENAI_API_KEY:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "أجب كمساعد مكتبة ذكي في قطر. أجب بالعربية دومًا."},
-                {"role": "user", "content": q}
-            ],
-            max_tokens=200,
-            temperature=0.3
-        )
-        answer = response.choices[0].message.content.strip()
+        if client:
+            res = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "أنت مساعد مكتبة ذكي لمدارس قطر. أجِب باحترام وبالعربية فقط."},
+                    {"role": "user", "content": q}
+                ],
+                max_tokens=250,
+                temperature=0.3
+            )
+            answer = res.choices[0].message.content.strip()
+        else:
+            answer = "⚠️ لا يوجد اتصال بمفتاح OpenAI."
+
+        with st.chat_message("assistant"):
+            st.write(answer)
+
+# ========== نقطة التشغيل ==========
+def main():
+    st.set_page_config(page_title="EDU AI Library", layout="wide")
+    if "user" not in st.session_state:
+        login_view()
     else:
+        app_view()
+
+if __name__ == "__main__":
+    main()
+
         answer = "⚠️ No OpenAI key found."
 
     with st.chat_message("assistant"):
