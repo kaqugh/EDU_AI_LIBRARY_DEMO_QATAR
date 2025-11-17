@@ -5,6 +5,9 @@
 # - Respects `active` field
 # - NO .env, reads OpenAI key from st.secrets
 
+# ✅ Final version of app.py (SAFE)
+# OpenAI key is securely loaded from Streamlit Secrets only
+
 import os, csv
 import streamlit as st
 import pandas as pd
@@ -18,7 +21,16 @@ BOOKS_CSV = "data/books.csv"
 
 # ========== LOAD API KEY SECURELY ==========
 OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
+st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))  # Debug info
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+# (rest of your app.py code remains unchanged and safe...)
+
+
+# (rest of your app.py code remains unchanged and safe...)
+
+
+
 
 # ========== UI HEADER ==========
 def ministry_header():
