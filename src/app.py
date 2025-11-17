@@ -10,86 +10,84 @@
 
 # ✅ Final version of app.py (with availability check fix)
 # ✅ النسخة السابقة من app.py مع واجهة تسجيل دخول للمجموعات الثلاث (طلاب، معلمون، موظفو الوزارة)
+# ✅ Final version of app.py (Role-Based Login + GPT + Availability Handling)
+row = books[books["title"] == title]
+if not row.empty:
+status = row.iloc[0]["status"]
+return f"📚 حالة الكتاب '{title}': {'متوفر حاليًا ✅' if status == 'available' else 'مستعار حاليًا ❌'}"
+return None
 
-import os, csv
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-from openai import OpenAI
-from offline_retrieval import recommend_for_user, semantic_search_books
 
-# ========== إعداد المسارات ==========
-USERS_CSV = "data/users_profiles.csv"
-BOOKS_CSV = "data/books.csv"
+# ========== CHAT VIEW ==========
+def chat_view():
+st.title("💬 مكتبة قطر الذكية — AI Library Agent")
+user = st.session_state.user
+st.markdown(f"مرحبًا {user['name']} 🎉 — **{user['role']}**")
 
-# ========== إعداد مفتاح OpenAI ==========
-OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
-st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# ========== تحميل البيانات ==========
-users = pd.read_csv(USERS_CSV)
-books = pd.read_csv(BOOKS_CSV)
+for msg in st.session_state.chat:
+align = "🧑‍🏫" if msg["role"] == "user" else "🤖"
+st.markdown(f"{align} : {msg['content']}")
 
-# ========== دالة تسجيل الدخول ==========
+
+q = st.chat_input("اكتب سؤالك هنا...", key="chatbox")
+if q:
+st.session_state.chat.append({"role": "user", "content": q})
+ans = handle_availability(user)
+
+
+if not ans and client:
+prompt = f"""You are a helpful assistant for Qatar school libraries. Answer in the user's language.
+User Role: {user['role']}
+Department: {user['department']}
+Question: {q}"
+response = client.chat.completions.create(
+model="gpt-3.5-turbo",
+messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.chat[-3:]] + [{"role": "user", "content": prompt}]
+)
+ans = response.choices[0].message.content.strip()
+
+
+st.session_state.chat.append({"role": "assistant", "content": ans or "لم أتمكن من فهم سؤالك تمامًا. حاول بصيغة أخرى."})
+st.experimental_rerun()
+
+
+# ========== LOGIN VIEW ==========
 def login_view():
-    st.title("📘 EDU_AI_LIBRARY — Qatar")
-    st.subheader("واجهة الدخول الرئيسية")
+st.title("📘 EDU_AI_LIBRARY — Qatar")
+st.subheader("واجهة الدخول الرئيسية")
 
-    group = st.selectbox("👥 اختر الفئة:", ["طلاب", "معلمون", "مدير قسم المكتبات"])
-    filtered = users[users["role"] == ("طالب" if group == "طلاب" else ("معلم" if group == "معلمون" else "مدير قسم المكتبات"))]
-    name = st.selectbox("👤 اختر اسمك:", filtered["name"].tolist())
 
-    if st.button("✅ تسجيل الدخول"):
-        user = filtered[filtered["name"] == name].iloc[0].to_dict()
-        st.session_state.user = {
-            "name": user["name"],
-            "role": user["role"],
-            "school": user.get("department", "")
-        }
-        st.success(f"مرحبًا {user['name']} 👋")
-        st.rerun()
+group = st.selectbox("👥 اختر الفئة:", ["الطلاب", "المعلمون", "مدير قسم المكتبات"])
+role_map = {"الطلاب": "طالب", "المعلمون": "معلم", "مدير قسم المكتبات": "مدير قسم المكتبات"}
+filtered = users[users["role"] == role_map[group]]
+name = st.selectbox("👤 اختر اسمك:", filtered["name"].tolist())
 
-# ========== دالة العرض الرئيسية ==========
-def app_view():
-    st.sidebar.success(f"🟢 {st.session_state['user']['name']} — {st.session_state['user']['role']}")
-    st.title("🤖 مكتبة قطر الذكية — AI Library Agent")
-    st.caption("هذه مكتبتك الذكية. كيف يمكنني مساعدتك اليوم؟")
 
-    q = st.chat_input("✍️ اكتب سؤالك هنا...")
-    if q:
-        with st.chat_message("user"):
-            st.write(q)
+if st.button("🚀 تسجيل الدخول"):
+user_row = filtered[filtered["name"] == name].iloc[0].to_dict()
+st.session_state.user = {
+"name": user_row["name"],
+"role": user_row["role"],
+"department": user_row.get("department", "")
+}
+st.session_state.chat = []
+st.experimental_rerun()
 
-        if client:
-            res = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "أنت مساعد مكتبة ذكي لمدارس قطر. أجِب باحترام وبالعربية فقط."},
-                    {"role": "user", "content": q}
-                ],
-                max_tokens=250,
-                temperature=0.3
-            )
-            answer = res.choices[0].message.content.strip()
-        else:
-            answer = "⚠️ لا يوجد اتصال بمفتاح OpenAI."
 
-        with st.chat_message("assistant"):
-            st.write(answer)
-
-# ========== نقطة التشغيل ==========
+# ========== MAIN ==============
 def main():
-    st.set_page_config(page_title="EDU AI Library", layout="wide")
-    if "user" not in st.session_state:
-        login_view()
-    else:
-        app_view()
+if st.session_state.user is None:
+login_view()
+else:
+if st.button("🏠 العودة للرئيسية"):
+st.session_state.user = None
+st.session_state.chat = []
+st.experimental_rerun()
+if st.session_state.user["role"] == "مدير قسم المكتبات":
+manager_dashboard_full()
+chat_view()
+
 
 if __name__ == "__main__":
-    main()
-
-        answer = "⚠️ No OpenAI key found."
-
-    with st.chat_message("assistant"):
-        st.write(answer)
+main()
