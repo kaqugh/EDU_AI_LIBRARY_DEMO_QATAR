@@ -20,7 +20,7 @@ USERS_CSV = "data/users_profiles.csv"
 BOOKS_CSV = "data/books.csv"
 
 # ========== LOAD API KEY SECURELY ==========
-OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
+OPENAI_API_KEY = st.secrets.get(OPENAI_API_KEY, None)
 st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))  # Debug info
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
