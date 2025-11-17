@@ -1,6 +1,4 @@
-# ✅ Final version of app.py with Qatar Library Scope Restriction
-# - Ensures assistant only answers questions related to Qatar school libraries
-# - Adds system instruction and scope validation
+# ✅ Final version of app.py with strict Qatar-only filtering and question protection
 
 import os, csv
 import streamlit as st
@@ -9,70 +7,13 @@ from datetime import datetime, timedelta
 from openai import OpenAI
 from offline_retrieval import recommend_for_user, semantic_search_books
 
+# ========== CONFIG ==========
 USERS_CSV = "data/users_profiles.csv"
 BOOKS_CSV = "data/books.csv"
 
 OPENAI_API_KEY = st.secrets.get("OPENAI_KEY", None)
 st.sidebar.write("🔐 Key Loaded:", bool(OPENAI_API_KEY))
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-# ========== Qatar-specific system message ==========
-def get_qatar_system_message():
-    return (
-        "أنت وكيل مكتبة ذكي خاص بوزارة التربية والتعليم والتعليم العالي في دولة قطر. "
-        "تقتصر إجاباتك فقط على خدمات مكتبات المدارس القطرية، مثل استعارة الكتب، التوصيات، توفّر المصادر، وتقارير الاستعارة. "
-        "إذا وردك سؤال خارج هذا النطاق، اعتذر بلطف واذكر أن مهمتك تقتصر على دعم مكتبات مدارس قطر فقط."
-    )
-
-# ========== Scope Checker ==========
-def is_out_of_scope(question):
-    banned_keywords = [
-        "أوروبا", "السياسة", "ديانة", "معتقد", "روايات عالمية", "الفضاء", "جغرافيا العالم",
-        "أدب روسي", "تاريخ أوروبا", "التاريخ الأمريكي", "الفلسفة الغربية", "رواية", "الحرب العالمية"
-    ]
-    return any(kw in question.lower() for kw in banned_keywords)
-
-# ========== AI Answering ==========
-def ai_answer(user, question, context=""):
-    if is_out_of_scope(question):
-        return "⚠️ اختصاصي يقتصر فقط على دعم مكتبات المدارس القطرية."
-
-    lang = str(user.get("preferred_language", "Arabic")).lower()
-    prompt = f"User: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
-    system_msg = get_qatar_system_message()
-
-    if not client:
-        return "🔒 لا يوجد اتصال بمفتاح OpenAI."
-
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.3
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"⚠️ خطأ أثناء الاتصال بـ OpenAI: {e}"
-
-# باقي الكود يبقى كما هو دون تعديل
-
-# (يرجى التأكد من أن `chat_view()` تستخدم ai_answer الآن وتتحقق من out_of_scope إذا رغبت بالتحقق المسبق)
-# ويمكنك لاحقًا نقل هذا المنطق داخل chat_view مباشرة إن أردت دمجًا أعمق
-
-
-
-# ========== UI HEADER ==========
-def ministry_header():
-    st.markdown("""
-        <div style="background-color:#E8F3FB; padding:15px; border-radius:10px; border:1px solid #c8e1f0; text-align:center; font-family:'Tajawal', sans-serif;">
-        <h3 style="margin:0; color:#003366;">
-            🇶🇦 وزارة التربية والتعليم والتعليم العالي – 
-            <span style="color:#0059b3;">Ministry of Education and Higher Education - Qatar</span>
-        </h3></div>""", unsafe_allow_html=True)
 
 # ========== LOAD DATA ==========
 def load_users():
@@ -87,6 +28,18 @@ def load_books():
 def save_books(df):
     df.to_csv(BOOKS_CSV, index=False, encoding="utf-8-sig")
 
+# ========== HEADER UI ==========
+def ministry_header():
+    st.markdown("""
+        <div style="background-color:#E8F3FB; padding:15px; border-radius:10px; border:1px solid #c8e1f0; text-align:center; font-family:'Tajawal', sans-serif;">
+        <h3 style="margin:0; color:#003366;">
+            🇶🇦 وزارة التربية والتعليم والتعليم العالي – 
+            <span style="color:#0059b3;">Ministry of Education and Higher Education - Qatar</span>
+        </h3></div>""", unsafe_allow_html=True)
+
+# ========== FILTER ==========
+FORBIDDEN_WORDS = ["السعودية", "مصر", "الكويت", "العراق", "الإمارات", "أمريكا", "USA", "UK", "India", "Germany"]
+
 # ========== LOGGING ==========
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
@@ -94,17 +47,22 @@ def log_interaction(user, question, answer):
     with open("logs/user_activity.csv", "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow(row)
 
-# ========== AI DETECTION ==========
+# ========== DETECT LANGUAGE ==========
 def detect_language(user):
     lang = str(user.get("preferred_language", "Arabic")).lower()
     return "AR" if "arab" in lang else "EN"
 
+# ========== AI ==========
 def ai_answer(user, question, context=""):
     lang = detect_language(user)
     if not client:
         return "🔒 No OpenAI key found." if lang == "EN" else "🔒 لا يوجد مفتاح OpenAI مفعّل."
+
+    if any(w.lower() in question.lower() for w in FORBIDDEN_WORDS):
+        return "❌ المساعد الذكي مخصص فقط لخدمة مكتبات قطر المدرسية." if lang == "AR" else "❌ This assistant only supports Qatar school libraries."
+
+    system_msg = "You are a helpful assistant for Qatar school libraries only. Always decline unrelated questions."
     prompt = f"User: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
-    system_msg = "You are an intelligent library assistant for the Ministry of Education in Qatar. Reply formally in the user's preferred language."
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -128,7 +86,7 @@ def is_availability_intent(q):
 def is_recommendation_intent(q):
     return any(k in q.lower() for k in ["انصحني", "اقتراح", "recommend"])
 
-# ========== LOGIC FUNCTIONS ==========
+# ========== ACTIONS ==========
 def handle_borrow(user):
     books, users = load_books(), load_users()
     uid = user["user_id"]
@@ -183,7 +141,7 @@ def handle_recommendation(user):
     recs = recommend_for_user(user["name"], k=3)
     return "📚 مقترحات لك: " + ", ".join([f"**{t}**" for t, _ in recs]) if recs else "لا توجد اقتراحات حالياً."
 
-# ========== CHAT INTERFACE ==========
+# ========== CHAT ==========
 def chat_view():
     ministry_header()
     user = st.session_state["user"]
@@ -193,7 +151,7 @@ def chat_view():
         st.rerun()
     st.title("🤖 المساعد الذكي للمكتبة" if lang == "AR" else "🤖 Smart Library Assistant")
     for msg in st.session_state.get("messages", []):
-        st.markdown(f"**{'🧑‍💻' if msg['role']=='user' else '🤖'}:** {msg['content']}")
+        st.markdown(f"**{'🧑\u200d💻' if msg['role']=='user' else '🤖'}:** {msg['content']}")
     q = st.chat_input("اكتب سؤالك هنا..." if lang == "AR" else "Type your question here...")
     if q and q != st.session_state.get("last_question"):
         st.session_state["last_question"] = q
@@ -213,7 +171,7 @@ def chat_view():
         log_interaction(user, q, ans)
         st.rerun()
 
-# ========== LOGIN UI ==========
+# ========== LOGIN ==========
 def login_view():
     ministry_header()
     st.title("📘 تسجيل الدخول إلى مكتبة قطر الذكية")
