@@ -14,6 +14,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from openai import OpenAI
 from offline_retrieval import recommend_for_user, semantic_search_books
+from log_utils import log_event
 
 # ========== FILE PATHS ==========
 USERS_CSV = "data/users_profiles.csv"
@@ -199,6 +200,26 @@ def login_view():
                 st.session_state["messages"] = [{"role": "assistant", "content": f"👋 مرحبًا {user['name']}! كيف يمكنني مساعدتك اليوم؟"}]
                 st.session_state["page"] = "chat"
                 st.rerun()
+
+def example_workflow(user, question):
+    log_event("Data Layer", f"User loaded: {user['name']}")
+
+    # Simulate intent detection
+    if "borrow" in question.lower():
+        log_event("Intent Detection", "User intent: borrow")
+        # Simulate response
+        answer = "You can borrow this book until next week."
+        log_event("AI Layer", f"Answer generated: {answer}")
+    else:
+        log_event("Intent Detection", "User intent: unknown")
+        answer = "I'm not sure how to help with that."
+
+    # Final action
+    log_event("Governance Layer", "Interaction logged")
+
+    return answer
+
+
 
 # ========== MAIN ==========
 def main():
