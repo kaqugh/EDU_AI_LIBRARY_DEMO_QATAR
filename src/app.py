@@ -55,6 +55,8 @@ def load_books():
 def save_books(df):
     df.to_csv(BOOKS_CSV, index=False, encoding="utf-8-sig")
 
+
+
 # ========== LOGGING ==========
 def log_interaction(user, question, answer):
     os.makedirs("logs", exist_ok=True)
@@ -95,6 +97,7 @@ def is_availability_intent(q):
 
 def is_recommendation_intent(q):
     return any(k in q.lower() for k in ["انصحني", "اقتراح", "recommend"])
+
 
 # ========== LOGIC FUNCTIONS ==========
 def handle_borrow(user):
@@ -180,7 +183,22 @@ def chat_view():
         st.session_state["messages"].append({"role": "assistant", "content": ans})
         log_interaction(user, q, ans)
         st.rerun()
+ log_event("Data Layer", f"Loaded user: {user['name']}")
+    
+    q = st.chat_input("...")
 
+    if q:
+        intent = detect_intent(q)
+        log_event("Intent Detection", f"Intent detected: {intent}")
+
+        prompt = f"User: {user['name']}\\nQuestion: {q}"
+        log_event("Prompt Layer", "Prompt constructed")
+
+        answer = ai_answer(user, q)
+        log_event("AI Layer", f"Generated answer: {answer[:60]}")
+
+        log_interaction(user, q, answer)
+        log_event("Governance Layer", "Interaction logged")
 # ========== LOGIN UI ==========
 def login_view():
     ministry_header()
@@ -201,23 +219,7 @@ def login_view():
                 st.session_state["page"] = "chat"
                 st.rerun()
 
-def example_workflow(user, question):
-    log_event("Data Layer", f"User loaded: {user['name']}")
 
-    # Simulate intent detection
-    if "borrow" in question.lower():
-        log_event("Intent Detection", "User intent: borrow")
-        # Simulate response
-        answer = "You can borrow this book until next week."
-        log_event("AI Layer", f"Answer generated: {answer}")
-    else:
-        log_event("Intent Detection", "User intent: unknown")
-        answer = "I'm not sure how to help with that."
-
-    # Final action
-    log_event("Governance Layer", "Interaction logged")
-
-    return answer
 
 
 
