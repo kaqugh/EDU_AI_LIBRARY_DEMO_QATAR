@@ -181,7 +181,8 @@ else:
 
     system_msg = assistant_prompt(user["role"])
 
-                prompt = f"{system_msg}\nUser: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
+    prompt = f"{system_msg}\nUser: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
+
                 if client:
                     try:
                         resp = client.chat.completions.create(
