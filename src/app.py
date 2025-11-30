@@ -173,7 +173,12 @@ def chat_view():
             if check_out_of_scope(question):
                 answer = "❌ أعتذر، أستطيع فقط الرد على أسئلة تتعلق بمكتبات المدارس في قطر."
             else:
-                context = "\n".join([f"- {t}" for t, _ in recommend_for_user(user["name"], k=3)])
+                recs = recommend_for_user(user["name"], k=3)
+if not recs:
+    context = "لا توجد كتب مقترحة حالياً."
+else:
+    context = "\n".join([f"- {t}" for t, _ in recs])
+
                 system_msg = assistant_prompt(user["role"])
                 prompt = f"{system_msg}\nUser: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
                 if client:
