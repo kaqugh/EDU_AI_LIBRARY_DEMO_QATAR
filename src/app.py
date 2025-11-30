@@ -179,7 +179,8 @@ if not recs:
 else:
     context = "\n".join([f"- {t}" for t, _ in recs])
 
-                system_msg = assistant_prompt(user["role"])
+        system_msg = assistant_prompt(user["role"])
+
                 prompt = f"{system_msg}\nUser: {user['name']}\nContext:\n{context}\n\nQuestion: {question}"
                 if client:
                     try:
