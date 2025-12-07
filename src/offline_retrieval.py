@@ -5,17 +5,38 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 
 VECTORS_DIR = "vectors"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-_embedder = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+_embedder = None
+
+
+def _get_embedder():
+    """Lazily initialize the embedding model with graceful fallback."""
+    global _embedder
+    if _embedder is None:
+        try:
+            _embedder = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+        except Exception as e:
+            print(f"⚠️ Failed to initialize embeddings: {e}")
+            _embedder = False  # sentinel meaning unavailable
+    return _embedder if _embedder is not False else None
 
 
 def _load():
     """Safely load FAISS index if exists, otherwise return None."""
     try:
+        embedder = _get_embedder()
+        if not embedder:
+            print("⚠️ Embedding model unavailable — switching to demo mode.")
+            return None
+
         if os.path.exists(VECTORS_DIR):
             faiss_files = [f for f in os.listdir(VECTORS_DIR) if f.endswith(".faiss")]
             if faiss_files:
                 print("✅ FAISS index detected, loading vectors...")
-                return FAISS.load_local(VECTORS_DIR, _embedder, allow_dangerous_deserialization=True)
+                return FAISS.load_local(
+                    VECTORS_DIR,
+                    embedder,
+                    allow_dangerous_deserialization=True,
+                )
         print("⚠️ No FAISS index found — switching to demo mode.")
         return None
     except Exception as e:
